@@ -30,6 +30,9 @@
     .siren{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:10;background:radial-gradient(circle,rgba(255,255,255,.08),rgba(220,38,38,.48),rgba(127,29,29,.76));transition:.2s}.siren.on{opacity:1;animation:flash .62s infinite}@keyframes flash{0%,100%{filter:brightness(.78)}50%{filter:brightness(1.85)}}
     .public-sos{position:fixed;inset:0;background:linear-gradient(155deg,#7f1d1d,#111827 58%,#020617);z-index:40;padding:16px;overflow:auto;display:none}.public-sos.on{display:block}.public-wrap{width:min(820px,100%);margin:0 auto}.public-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.public-title{text-align:center;border:3px solid rgba(255,255,255,.45);border-radius:28px;padding:20px;background:rgba(255,255,255,.1);box-shadow:0 30px 90px rgba(0,0,0,.45)}.public-title h2{font-size:clamp(38px,12vw,88px);line-height:.92;margin:0;letter-spacing:-.08em}.public-title p{font-size:clamp(18px,5vw,32px);font-weight:1000;color:#fff7ed;margin:12px 0 0}.qr-box{margin:14px auto 0;background:#fff;color:#111827;border-radius:24px;padding:16px;text-align:center;width:min(360px,100%)}.qr-box img{width:100%;max-width:280px;border-radius:16px}.public-location{background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.16);border-radius:20px;padding:14px;margin-top:14px;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}.hidden{display:none!important}.countdown{font-size:44px;font-weight:1000;letter-spacing:-.05em;color:#fecaca}.mini-list{display:grid;gap:8px;margin-top:10px}.mini{padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.08);font-size:13px;color:#e5e7eb}
   </style>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <div class="siren" id="sirenLayer"></div>
@@ -158,6 +161,23 @@
   <div class="bottom-bar"><div class="bottom-inner"><button class="btn red" onclick="triggerSOS('bottom')">SOS SEKARANG</button><button class="btn green" onclick="sendWhatsApp()">WA KELUARGA</button></div></div>
 
 <script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyCOwyyhNKRF0bl6t3ozSP2CrcxIo1gY7BA",
+    authDomain: "alarm-sos-b73cc.firebaseapp.com",
+    projectId: "alarm-sos-b73cc",
+    storageBucket: "alarm-sos-b73cc.firebasestorage.app",
+    messagingSenderId: "745103732098",
+    appId: "1:745103732098:web:a7f5ae578a0c548669739b",
+    measurementId: "G-9VK9JJB9N9"
+  };
+
+  let db=null, analytics=null, currentSosDocId=null;
+  try{
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    if(location.protocol === 'https:' && firebase.analytics){ analytics = firebase.analytics(); }
+  }catch(e){ console.warn('Firebase init gagal:', e); }
+
   let armed=false,alarmOn=false,threshold=55,shakeScore=0,lastMotionAt=0,audioCtx=null,alarmTimer=null,lastLocation=null,voiceTimer=null,autoSendTimer=null;
   const el=id=>document.getElementById(id);
   function log(msg){const t=new Date().toLocaleTimeString('id-ID');el('logBox').textContent=`[${t}] ${msg}
@@ -171,19 +191,79 @@
   async function unlockAudio(){if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')await audioCtx.resume()}
   async function armSafety(){if(armed){armed=false;el('armBtn').classList.remove('active');el('armBtn').textContent='AKTIFKAN PENGAMAN';el('mainStatus').textContent='Mode aman dimatikan';el('statusText').textContent='Sensor goyang sedang tidak aktif.';log('Mode pengaman dimatikan.');return}saveSettings();await unlockAudio();if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){try{const res=await DeviceMotionEvent.requestPermission();if(res!=='granted'){log('Izin sensor gerak ditolak. Gunakan tombol SOS manual.');alert('Izin sensor gerak ditolak. Tombol SOS manual tetap bisa dipakai.');return}}catch(e){log('Gagal meminta izin sensor gerak.')}}armed=true;el('armBtn').classList.add('active');el('armBtn').textContent='PENGAMAN AKTIF';el('mainStatus').textContent='Mode aman aktif';el('statusText').textContent='Goyangkan HP kuat beberapa kali untuk memicu alarm dan lokasi darurat.';log('Mode pengaman aktif. Sensor goyang berjalan.')}
   window.addEventListener('devicemotion',e=>{if(!armed||alarmOn)return;const a=e.accelerationIncludingGravity||e.acceleration||{x:0,y:0,z:0};const total=Math.abs(a.x||0)+Math.abs(a.y||0)+Math.abs(a.z||0);const now=Date.now();if(total>21&&now-lastMotionAt>110){shakeScore+=Math.min(20,Math.round(total/2));lastMotionAt=now}else{shakeScore=Math.max(0,shakeScore-.7)}const pct=Math.min(100,(shakeScore/threshold)*100);el('shakeMeter').style.width=pct+'%';el('shakeValue').textContent=Math.round(shakeScore);if(shakeScore>=threshold){triggerSOS('goyangan HP');shakeScore=0}});
-  async function triggerSOS(source='manual'){saveSettings();await unlockAudio();alarmOn=true;el('sirenLayer').classList.add('on');el('mainStatus').textContent='SOS AKTIF!';el('statusText').textContent='Alarm berbunyi. Sistem sedang mengambil lokasi dan menyiapkan pesan darurat.';log('SOS aktif melalui: '+source);if(el('publicMode').checked)showPublicSOS();startAlarmSound();speakHelp();getLocation();const dur=Number(el('alarmDuration').value||60000);if(dur>0){clearTimeout(alarmTimer);alarmTimer=setTimeout(stopAlarm,dur)}}
+  async function triggerSOS(source='manual'){
+    saveSettings();
+    await unlockAudio();
+    alarmOn=true;
+    currentSosDocId=null;
+    el('sirenLayer').classList.add('on');
+    el('mainStatus').textContent='SOS AKTIF!';
+    el('statusText').textContent='Alarm berbunyi. Sistem sedang mengambil lokasi dan menyiapkan pesan darurat.';
+    log('SOS aktif melalui: '+source);
+    saveSosToFirebase(source, 'SOS_AKTIF');
+    if(el('publicMode').checked)showPublicSOS();
+    startAlarmSound();
+    speakHelp();
+    getLocation();
+    const dur=Number(el('alarmDuration').value||60000);
+    if(dur>0){clearTimeout(alarmTimer);alarmTimer=setTimeout(stopAlarm,dur)}
+  }
   function startAlarmSound(){if(!audioCtx)return;const vol=Number(el('volumeLevel').value||.95);let count=0;const play=()=>{if(!alarmOn||!audioCtx)return;const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='square';osc.frequency.setValueAtTime(count%2?880:1320,audioCtx.currentTime);gain.gain.setValueAtTime(vol,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.01,audioCtx.currentTime+.32);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+.34);count++;setTimeout(play,360)};play()}
   function speakHelp(){if(!('speechSynthesis'in window))return;const say=()=>{if(!alarmOn)return;const u=new SpeechSynthesisUtterance('Tolong! Tolong! Saya dalam bahaya. Mohon bantu saya sekarang.');u.lang='id-ID';u.volume=Number(el('volumeLevel').value||.95);u.rate=.96;u.pitch=1.08;speechSynthesis.speak(u);voiceTimer=setTimeout(say,3900)};say()}
-  function stopAlarm(){alarmOn=false;el('sirenLayer').classList.remove('on');clearTimeout(alarmTimer);clearTimeout(voiceTimer);clearInterval(autoSendTimer);el('countBox').classList.add('hidden');if('speechSynthesis'in window)speechSynthesis.cancel();el('mainStatus').textContent=armed?'Mode aman aktif':'Mode aman belum aktif';el('statusText').textContent=armed?'Sensor tetap aktif. Goyangkan HP untuk memicu SOS lagi.':'Alarm sudah dimatikan.';log('Alarm dimatikan.')}
+  function stopAlarm(){alarmOn=false;el('sirenLayer').classList.remove('on');clearTimeout(alarmTimer);clearTimeout(voiceTimer);clearInterval(autoSendTimer);el('countBox').classList.add('hidden');if('speechSynthesis'in window)speechSynthesis.cancel();el('mainStatus').textContent=armed?'Mode aman aktif':'Mode aman belum aktif';el('statusText').textContent=armed?'Sensor tetap aktif. Goyangkan HP untuk memicu SOS lagi.':'Alarm sudah dimatikan.';log('Alarm dimatikan.');updateSosFirebase('ALARM_DIMATIKAN')}
   function testAlarm(){unlockAudio().then(()=>{alarmOn=true;el('sirenLayer').classList.add('on');startAlarmSound();speakHelp();log('Tes alarm 5 detik.');setTimeout(stopAlarm,5000)})}
   function getLocation(){if(!navigator.geolocation){log('GPS tidak didukung browser ini.');updateLocationViews(null,'GPS tidak didukung browser ini.');scheduleAutoSend();return}updateLocationViews(null,'Mengambil lokasi GPS... izinkan akses lokasi bila muncul notifikasi.');navigator.geolocation.getCurrentPosition(pos=>{lastLocation={lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:Math.round(pos.coords.accuracy||0),time:new Date().toLocaleString('id-ID')};const maps=getMapLink();const text=`Lokasi ditemukan:
 Latitude: ${lastLocation.lat}
 Longitude: ${lastLocation.lng}
 Akurasi: ±${lastLocation.accuracy} meter
 Waktu: ${lastLocation.time}
-Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil didapat.');scheduleAutoSend()},err=>{let msg='Gagal mengambil lokasi.';if(err.code===1)msg='Izin lokasi ditolak.';if(err.code===2)msg='Lokasi tidak tersedia.';if(err.code===3)msg='Waktu ambil lokasi habis.';updateLocationViews(null,msg);log(msg);scheduleAutoSend()},{enableHighAccuracy:true,timeout:15000,maximumAge:0})}
+Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil didapat.');updateSosFirebase('LOKASI_DITEMUKAN');scheduleAutoSend()},err=>{let msg='Gagal mengambil lokasi.';if(err.code===1)msg='Izin lokasi ditolak.';if(err.code===2)msg='Lokasi tidak tersedia.';if(err.code===3)msg='Waktu ambil lokasi habis.';updateLocationViews(null,msg);log(msg);scheduleAutoSend()},{enableHighAccuracy:true,timeout:15000,maximumAge:0})}
   function getMapLink(){return lastLocation?`https://maps.google.com/?q=${lastLocation.lat},${lastLocation.lng}`:''}
   function updateLocationViews(loc,text){el('locationBox').textContent=text;el('publicLocationBox').textContent=text;const link=loc?getMapLink():'https://maps.google.com';el('qrImg').src='https://api.qrserver.com/v1/create-qr-code/?size=420x420&data='+encodeURIComponent(link)}
+  async function saveSosToFirebase(source,status){
+    if(!db){log('Firebase belum aktif. SOS hanya berjalan lokal.');return}
+    const phone=normalizePhone(el('contactPhone').value.trim());
+    const payload={
+      status:status||'SOS_AKTIF',
+      source:source||'manual',
+      contactName:el('contactName').value.trim()||'',
+      contactPhone:phone||'',
+      contactEmail:el('contactEmail').value.trim()||'',
+      groupLink:el('groupLink').value.trim()||'',
+      message:el('messageText').value.trim()||'',
+      mapLink:lastLocation?getMapLink():'',
+      lat:lastLocation?lastLocation.lat:null,
+      lng:lastLocation?lastLocation.lng:null,
+      accuracy:lastLocation?lastLocation.accuracy:null,
+      userAgent:navigator.userAgent,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    try{
+      const doc=await db.collection('sos_events').add(payload);
+      currentSosDocId=doc.id;
+      log('SOS tersimpan ke Firebase: '+doc.id);
+    }catch(e){
+      log('Gagal simpan SOS ke Firebase: '+e.message);
+    }
+  }
+  async function updateSosFirebase(status){
+    if(!db||!currentSosDocId)return;
+    const payload={
+      status:status||'UPDATED',
+      mapLink:lastLocation?getMapLink():'',
+      lat:lastLocation?lastLocation.lat:null,
+      lng:lastLocation?lastLocation.lng:null,
+      accuracy:lastLocation?lastLocation.accuracy:null,
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    try{
+      await db.collection('sos_events').doc(currentSosDocId).set(payload,{merge:true});
+      log('Firebase update: '+status);
+    }catch(e){
+      log('Gagal update Firebase: '+e.message);
+    }
+  }
   function makeEmergencyText(){const name=el('contactName').value.trim()||'Keluarga';const base=el('messageText').value.trim()||'TOLONG! Saya dalam keadaan darurat. Ini lokasi HP saya:';const loc=lastLocation?`
 
 Lokasi: ${getMapLink()}
