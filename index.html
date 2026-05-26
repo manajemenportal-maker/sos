@@ -150,7 +150,7 @@
           <div class="mini">Tombol telepon/WA/share memudahkan security, keluarga, atau warga membantu.</div>
           <div class="mini">Tidak ada spam liar ke Bluetooth/GSM, sehingga lebih aman dan legal.</div>
         </div>
-        <div class="actions"><button class="btn red" onclick="showPublicSOS()">Tampilkan SOS Publik</button><button class="btn dark" onclick="clearLog()">Bersihkan Log</button></div>
+        <div class="actions"><button class="btn red" onclick="showPublicSOS()">Tampilkan SOS Publik</button><button class="btn blue" onclick="testFirebase()">Tes Firebase</button><button class="btn dark" onclick="clearLog()">Bersihkan Log</button></div>
         <h2 style="margin-top:16px">Catatan Sistem</h2>
         <div class="log" id="logBox">SafeShake siap. Tekan aktifkan untuk mulai.</div>
         <div class="actions"><button class="btn red" onclick="stopAlarm()">Matikan Alarm</button><button class="btn dark" onclick="closePublicSOS()">Tutup SOS Publik</button></div>
@@ -180,8 +180,7 @@
 
   let armed=false,alarmOn=false,threshold=55,shakeScore=0,lastMotionAt=0,audioCtx=null,alarmTimer=null,lastLocation=null,voiceTimer=null,autoSendTimer=null;
   const el=id=>document.getElementById(id);
-  function log(msg){const t=new Date().toLocaleTimeString('id-ID');el('logBox').textContent=`[${t}] ${msg}
-`+el('logBox').textContent}
+  function log(msg){const box=el('logBox'); if(!box)return; const t=new Date().toLocaleTimeString('id-ID'); box.textContent='['+t+'] '+msg+'\n'+box.textContent}
   function clearLog(){el('logBox').textContent='Log dibersihkan.'}
   function normalizePhone(phone){let p=(phone||'').replace(/[^0-9]/g,'');if(p.startsWith('0'))p='62'+p.slice(1);return p}
   function saveSettings(){const data={contactName:el('contactName').value.trim(),contactPhone:normalizePhone(el('contactPhone').value.trim()),contactEmail:el('contactEmail').value.trim(),groupLink:el('groupLink').value.trim(),messageText:el('messageText').value.trim(),sensitivity:el('sensitivity').value,alarmDuration:el('alarmDuration').value,volumeLevel:el('volumeLevel').value,autoSendMode:el('autoSendMode').value,sendDelay:el('sendDelay').value,publicMode:el('publicMode').checked};localStorage.setItem('safeshake_settings',JSON.stringify(data));el('contactPhone').value=data.contactPhone;updateCallButtons();log('Setting kontak darurat disimpan.')}
@@ -264,15 +263,30 @@ Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil di
       log('Gagal update Firebase: '+e.message);
     }
   }
-  function makeEmergencyText(){const name=el('contactName').value.trim()||'Keluarga';const base=el('messageText').value.trim()||'TOLONG! Saya dalam keadaan darurat. Ini lokasi HP saya:';const loc=lastLocation?`
-
-Lokasi: ${getMapLink()}
-Akurasi: ±${lastLocation.accuracy} meter
-Waktu: ${lastLocation.time}`:'
-
-Lokasi belum tersedia. Mohon hubungi saya segera.';return `${base}${loc}
-
-Kontak tujuan: ${name}`} 
+  function makeEmergencyText(){
+    const name=el('contactName').value.trim()||'Keluarga';
+    const base=el('messageText').value.trim()||'TOLONG! Saya dalam keadaan darurat. Ini lokasi HP saya:';
+    const loc=lastLocation
+      ? '\n\nLokasi: '+getMapLink()+'\nAkurasi: ±'+lastLocation.accuracy+' meter\nWaktu: '+lastLocation.time
+      : '\n\nLokasi belum tersedia. Mohon hubungi saya segera.';
+    return base+loc+'\n\nKontak tujuan: '+name;
+  }
+  async function testFirebase(){
+    if(!db){ log('Firebase belum aktif. Cek internet/CDN Firebase.'); alert('Firebase belum aktif.'); return; }
+    try{
+      const doc=await db.collection('sos_test').add({
+        status:'TES_FIREBASE_OK',
+        url:location.href,
+        userAgent:navigator.userAgent,
+        createdAt:firebase.firestore.FieldValue.serverTimestamp()
+      });
+      log('Tes Firebase berhasil: '+doc.id);
+      alert('Firebase berhasil tersambung. ID: '+doc.id);
+    }catch(e){
+      log('Tes Firebase gagal: '+e.message);
+      alert('Firebase gagal: '+e.message+'\n\nBiasanya karena Firestore Rules belum dibuka atau database belum dibuat.');
+    }
+  }
   function scheduleAutoSend(){const mode=el('autoSendMode').value;if(mode==='off'){log('Mode auto-send mati. Gunakan tombol kirim manual.');return}let s=Number(el('sendDelay').value||0);el('countBox').classList.remove('hidden');el('countdown').textContent=s;clearInterval(autoSendTimer);autoSendTimer=setInterval(()=>{el('countdown').textContent=s;if(s<=0){clearInterval(autoSendTimer);el('countBox').classList.add('hidden');if(mode==='whatsapp')sendWhatsApp();if(mode==='sms')sendSMS();if(mode==='email')sendEmail();if(mode==='share')shareNative();return}s--},1000);log('Auto-send mode '+mode+' dalam '+s+' detik.')}
   function sendWhatsApp(){const phone=normalizePhone(el('contactPhone').value.trim());if(!phone){alert('Isi nomor WhatsApp/HP kontak darurat dulu.');return}const text=encodeURIComponent(makeEmergencyText());window.open(`https://wa.me/${phone}?text=${text}`,'_blank');log('Membuka WhatsApp dengan pesan darurat.')}
   function sendSMS(){const phone=normalizePhone(el('contactPhone').value.trim());if(!phone){alert('Isi nomor HP kontak darurat dulu.');return}const text=encodeURIComponent(makeEmergencyText());window.location.href=`sms:${phone}?&body=${text}`;log('Membuka SMS dengan pesan darurat.')}
