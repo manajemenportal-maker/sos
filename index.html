@@ -115,7 +115,7 @@
           <div><label>Volume</label><select id="volumeLevel"><option value="0.75">Keras</option><option value="0.95" selected>Sangat keras</option><option value="1">Maksimal</option></select></div>
         </div>
         <label>Mode setelah SOS aktif</label>
-        <select id="autoSendMode"><option value="whatsapp" selected>Otomatis buka WhatsApp keluarga</option><option value="share">Otomatis buka Share HP</option><option value="sms">Otomatis buka SMS</option><option value="email">Otomatis buka Email</option><option value="off">Manual saja</option></select>
+        <select id="autoSendMode"><option value="operator" selected>Kirim ke Operator saja</option><option value="whatsapp">Operator + buka WhatsApp keluarga</option><option value="share">Operator + buka Share HP</option><option value="sms">Operator + buka SMS</option><option value="email">Operator + buka Email</option><option value="off">Manual saja</option></select>
         <label>Hitung mundur sebelum buka pesan</label>
         <select id="sendDelay"><option value="0">Langsung</option><option value="3" selected>3 detik</option><option value="5">5 detik</option><option value="10">10 detik</option></select>
         <label><input type="checkbox" id="publicMode" checked style="width:auto;margin-right:8px" /> Tampilkan layar SOS publik + QR lokasi saat darurat</label>
@@ -153,7 +153,7 @@
         <div class="actions"><button class="btn red" onclick="showPublicSOS()">Tampilkan SOS Publik</button><button class="btn blue" onclick="testFirebase()">Tes Firebase</button><button class="btn dark" onclick="clearLog()">Bersihkan Log</button></div>
         <h2 style="margin-top:16px">Catatan Sistem</h2>
         <div class="log" id="logBox">SafeShake siap. Tekan aktifkan untuk mulai.</div>
-        <div class="actions"><button class="btn red" onclick="stopAlarm()">Matikan Alarm</button><button class="btn dark" onclick="closePublicSOS()">Tutup SOS Publik</button></div>
+        <div class="actions"><button class="btn red" onclick="stopAlarm()">Matikan Alarm</button><button class="btn dark" onclick="closePublicSOS()">Tutup SOS Publik</button></div><div class="actions"><button class="btn blue" onclick="openOperatorDashboard()">Buka Dashboard Operator</button><button class="btn green" onclick="copyOperatorLink()">Copy Link Operator</button></div>
       </div>
     </section>
   </main>
@@ -180,7 +180,7 @@
 
   let armed=false,alarmOn=false,threshold=55,shakeScore=0,lastMotionAt=0,audioCtx=null,alarmTimer=null,lastLocation=null,voiceTimer=null,autoSendTimer=null;
   const el=id=>document.getElementById(id);
-  function log(msg){const box=el('logBox'); if(!box)return; const t=new Date().toLocaleTimeString('id-ID'); box.textContent='['+t+'] '+msg+'\n'+box.textContent}
+  function log(msg){const box=el('logBox'); if(!box){console.log(msg);return;} const nl=String.fromCharCode(10); const t=new Date().toLocaleTimeString('id-ID'); box.textContent='['+t+'] '+msg+nl+box.textContent}
   function clearLog(){el('logBox').textContent='Log dibersihkan.'}
   function normalizePhone(phone){let p=(phone||'').replace(/[^0-9]/g,'');if(p.startsWith('0'))p='62'+p.slice(1);return p}
   function saveSettings(){const data={contactName:el('contactName').value.trim(),contactPhone:normalizePhone(el('contactPhone').value.trim()),contactEmail:el('contactEmail').value.trim(),groupLink:el('groupLink').value.trim(),messageText:el('messageText').value.trim(),sensitivity:el('sensitivity').value,alarmDuration:el('alarmDuration').value,volumeLevel:el('volumeLevel').value,autoSendMode:el('autoSendMode').value,sendDelay:el('sendDelay').value,publicMode:el('publicMode').checked};localStorage.setItem('safeshake_settings',JSON.stringify(data));el('contactPhone').value=data.contactPhone;updateCallButtons();log('Setting kontak darurat disimpan.')}
@@ -235,6 +235,8 @@ Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil di
       lng:lastLocation?lastLocation.lng:null,
       accuracy:lastLocation?lastLocation.accuracy:null,
       userAgent:navigator.userAgent,
+      handledBy:'',
+      operatorNote:'',
       createdAt:firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -266,10 +268,11 @@ Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil di
   function makeEmergencyText(){
     const name=el('contactName').value.trim()||'Keluarga';
     const base=el('messageText').value.trim()||'TOLONG! Saya dalam keadaan darurat. Ini lokasi HP saya:';
+    const nl=String.fromCharCode(10);
     const loc=lastLocation
-      ? '\n\nLokasi: '+getMapLink()+'\nAkurasi: ±'+lastLocation.accuracy+' meter\nWaktu: '+lastLocation.time
-      : '\n\nLokasi belum tersedia. Mohon hubungi saya segera.';
-    return base+loc+'\n\nKontak tujuan: '+name;
+      ? nl+nl+'Lokasi: '+getMapLink()+nl+'Akurasi: ±'+lastLocation.accuracy+' meter'+nl+'Waktu: '+lastLocation.time
+      : nl+nl+'Lokasi belum tersedia. Mohon hubungi saya segera.';
+    return base+loc+nl+nl+'Kontak tujuan: '+name;
   }
   async function testFirebase(){
     if(!db){ log('Firebase belum aktif. Cek internet/CDN Firebase.'); alert('Firebase belum aktif.'); return; }
@@ -284,10 +287,10 @@ Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil di
       alert('Firebase berhasil tersambung. ID: '+doc.id);
     }catch(e){
       log('Tes Firebase gagal: '+e.message);
-      alert('Firebase gagal: '+e.message+'\n\nBiasanya karena Firestore Rules belum dibuka atau database belum dibuat.');
+      alert('Firebase gagal: '+e.message+String.fromCharCode(10)+String.fromCharCode(10)+'Biasanya karena Firestore Rules belum dibuka atau database belum dibuat.');
     }
   }
-  function scheduleAutoSend(){const mode=el('autoSendMode').value;if(mode==='off'){log('Mode auto-send mati. Gunakan tombol kirim manual.');return}let s=Number(el('sendDelay').value||0);el('countBox').classList.remove('hidden');el('countdown').textContent=s;clearInterval(autoSendTimer);autoSendTimer=setInterval(()=>{el('countdown').textContent=s;if(s<=0){clearInterval(autoSendTimer);el('countBox').classList.add('hidden');if(mode==='whatsapp')sendWhatsApp();if(mode==='sms')sendSMS();if(mode==='email')sendEmail();if(mode==='share')shareNative();return}s--},1000);log('Auto-send mode '+mode+' dalam '+s+' detik.')}
+  function scheduleAutoSend(){const mode=el('autoSendMode').value;if(mode==='operator'){log('Laporan sudah masuk ke operator. Tidak membuka aplikasi tambahan.');return}if(mode==='off'){log('Mode auto-send mati. Gunakan tombol kirim manual.');return}let s=Number(el('sendDelay').value||0);el('countBox').classList.remove('hidden');el('countdown').textContent=s;clearInterval(autoSendTimer);autoSendTimer=setInterval(()=>{el('countdown').textContent=s;if(s<=0){clearInterval(autoSendTimer);el('countBox').classList.add('hidden');if(mode==='whatsapp')sendWhatsApp();if(mode==='sms')sendSMS();if(mode==='email')sendEmail();if(mode==='share')shareNative();return}s--},1000);log('Auto-send mode '+mode+' dalam '+s+' detik.')}
   function sendWhatsApp(){const phone=normalizePhone(el('contactPhone').value.trim());if(!phone){alert('Isi nomor WhatsApp/HP kontak darurat dulu.');return}const text=encodeURIComponent(makeEmergencyText());window.open(`https://wa.me/${phone}?text=${text}`,'_blank');log('Membuka WhatsApp dengan pesan darurat.')}
   function sendSMS(){const phone=normalizePhone(el('contactPhone').value.trim());if(!phone){alert('Isi nomor HP kontak darurat dulu.');return}const text=encodeURIComponent(makeEmergencyText());window.location.href=`sms:${phone}?&body=${text}`;log('Membuka SMS dengan pesan darurat.')}
   function sendEmail(){const email=el('contactEmail').value.trim();if(!email){alert('Isi email kontak darurat dulu.');return}const subject=encodeURIComponent('SOS Darurat - Mohon Bantuan');const body=encodeURIComponent(makeEmergencyText());window.location.href=`mailto:${email}?subject=${subject}&body=${body}`;log('Membuka email dengan pesan darurat.')}
@@ -296,7 +299,42 @@ Map: ${maps}`;updateLocationViews(lastLocation,text);log('Lokasi GPS berhasil di
   function updateCallButtons(){const phone=normalizePhone(el('contactPhone').value.trim());const href=phone?'tel:+'+phone:'#';el('callBtn').href=href;el('publicCallBtn').href=href}
   function showPublicSOS(){updateCallButtons();el('publicSOS').classList.add('on');if(!lastLocation)getLocation();log('Layar SOS publik ditampilkan.')}
   function closePublicSOS(){el('publicSOS').classList.remove('on');log('Layar SOS publik ditutup.')}
-  el('armBtn').addEventListener('click',armSafety);['contactPhone'].forEach(id=>el(id).addEventListener('input',updateCallButtons));setSensitivity();secureCheck();loadSettings();updateLocationViews(null,'Lokasi belum tersedia.');
+  function openOperatorDashboard(){window.open(location.pathname+'?operator=1','_blank')}
+  async function copyOperatorLink(){const link=location.origin+location.pathname+'?operator=1';try{await navigator.clipboard.writeText(link);alert('Link operator disalin: '+link)}catch(e){prompt('Copy link operator:',link)}}
+  function bootOperatorDashboard(){
+    document.body.innerHTML='<main class="app"><section class="hero"><div class="brand"><div class="logo">OP</div><div><div style="font-weight:1000;font-size:18px">SafeShake Operator</div><div class="small">Dashboard penerima laporan SOS</div></div></div><h1>Dashboard Operator SOS.</h1><p class="lead">Laporan dari HP pengguna masuk realtime ke sini. Operator bisa buka maps, telepon, forward WhatsApp, share laporan, dan ubah status.</p><div class="status-card"><div><div class="status-title" id="opStatus">Menunggu koneksi Firebase...</div><div class="status-text">Klik refresh bila data belum muncul. Untuk uji coba pastikan Firestore Rules sudah dibuka.</div></div><button class="big-btn" onclick="startOperatorMonitor()">MULAI MONITOR</button></div></section><section class="grid"><div class="card"><h2>Daftar SOS Masuk</h2><div class="actions"><button class="btn blue" onclick="startOperatorMonitor()">Refresh Realtime</button><button class="btn yellow" onclick="testFirebaseOperator()">Tes Firebase</button></div><div id="operatorList" class="mini-list" style="margin-top:12px"><div class="mini">Belum ada data.</div></div></div><div class="card"><h2>Detail Laporan</h2><div class="log" id="operatorDetail" style="max-height:none;min-height:220px">Pilih laporan dari daftar kiri.</div><div class="actions"><a class="btn red" id="opCall" href="#">Telepon</a><button class="btn green" onclick="operatorForwardWA()">Forward WA</button><button class="btn white" onclick="operatorOpenMap()">Buka Maps</button><button class="btn blue" onclick="operatorShare()">Share</button></div><div class="actions"><button class="btn yellow" onclick="operatorSetStatus(\'DITANGANI_OPERATOR\')">Ditangani</button><button class="btn green" onclick="operatorSetStatus(\'SELESAI_AMAN\')">Selesai</button><button class="btn dark" onclick="operatorSetStatus(\'FALSE_ALARM\')">False Alarm</button><button class="btn red" onclick="operatorSetStatus(\'PERLU_BANTUAN_LANJUT\')">Butuh Bantuan</button></div></div></section></main>';
+    setTimeout(startOperatorMonitor,500);
+  }
+  let selectedOperatorEvent=null, operatorUnsub=null;
+  function startOperatorMonitor(){
+    if(!db){document.getElementById('opStatus').textContent='Firebase belum aktif';return}
+    if(operatorUnsub)operatorUnsub();
+    document.getElementById('opStatus').textContent='Realtime monitor aktif';
+    operatorUnsub=db.collection('sos_events').orderBy('createdAt','desc').limit(30).onSnapshot(function(snap){
+      const list=document.getElementById('operatorList');list.innerHTML='';
+      if(snap.empty){list.innerHTML='<div class="mini">Belum ada SOS masuk.</div>';return}
+      snap.forEach(function(doc){const d=doc.data();const item=document.createElement('div');item.className='mini';item.style.cursor='pointer';item.onclick=function(){selectOperatorEvent(doc.id,d)};item.innerHTML='<b>'+(d.contactName||'SOS Tanpa Nama')+'</b><br>Status: '+(d.status||'-')+'<br>HP: '+(d.contactPhone||'-')+'<br>Lokasi: '+(d.mapLink?'tersedia':'menunggu GPS');list.appendChild(item)})
+    },function(err){document.getElementById('opStatus').textContent='Monitor gagal: '+err.message})
+  }
+  function selectOperatorEvent(id,d){
+    selectedOperatorEvent={id:id,data:d};
+    const nl=String.fromCharCode(10);
+    const detail='ID: '+id+nl+'Status: '+(d.status||'-')+nl+'Nama kontak: '+(d.contactName||'-')+nl+'HP kontak: '+(d.contactPhone||'-')+nl+'Email: '+(d.contactEmail||'-')+nl+'Group: '+(d.groupLink||'-')+nl+nl+'Pesan:'+nl+(d.message||'-')+nl+nl+'Maps: '+(d.mapLink||'menunggu GPS')+nl+'Akurasi: '+(d.accuracy||'-')+' meter';
+    document.getElementById('operatorDetail').textContent=detail;
+    document.getElementById('opCall').href=d.contactPhone?'tel:+'+d.contactPhone:'#';
+  }
+  function operatorMessage(){if(!selectedOperatorEvent)return'';const d=selectedOperatorEvent.data;const nl=String.fromCharCode(10);return 'SOS DARURAT'+nl+'Status: '+(d.status||'-')+nl+'Kontak: '+(d.contactName||'-')+nl+'HP: '+(d.contactPhone||'-')+nl+'Lokasi: '+(d.mapLink||'menunggu GPS')+nl+'Mohon segera dibantu.'}
+  function operatorForwardWA(){if(!selectedOperatorEvent){alert('Pilih laporan dulu.');return}const d=selectedOperatorEvent.data;if(!d.contactPhone){alert('Nomor kontak belum ada.');return}window.open('https://wa.me/'+d.contactPhone+'?text='+encodeURIComponent(operatorMessage()),'_blank')}
+  function operatorOpenMap(){if(!selectedOperatorEvent){alert('Pilih laporan dulu.');return}const link=selectedOperatorEvent.data.mapLink;if(link)window.open(link,'_blank');else alert('Lokasi belum tersedia.')}
+  async function operatorShare(){if(!selectedOperatorEvent){alert('Pilih laporan dulu.');return}const text=operatorMessage();if(navigator.share){try{await navigator.share({title:'SOS Darurat',text:text})}catch(e){}}else{await navigator.clipboard.writeText(text);alert('Laporan disalin.')}}
+  async function operatorSetStatus(status){if(!selectedOperatorEvent||!db){alert('Pilih laporan dulu.');return}await db.collection('sos_events').doc(selectedOperatorEvent.id).set({status:status,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});selectedOperatorEvent.data.status=status;selectOperatorEvent(selectedOperatorEvent.id,selectedOperatorEvent.data)}
+  async function testFirebaseOperator(){if(!db){alert('Firebase belum aktif.');return}try{const doc=await db.collection('sos_test').add({status:'TES_OPERATOR_OK',createdAt:firebase.firestore.FieldValue.serverTimestamp()});alert('Firebase operator OK: '+doc.id)}catch(e){alert('Firebase gagal: '+e.message)}}
+  const params=new URLSearchParams(location.search);
+  if(params.get('operator')==='1'){
+    bootOperatorDashboard();
+  }else{
+    el('armBtn').addEventListener('click',armSafety);['contactPhone'].forEach(id=>el(id).addEventListener('input',updateCallButtons));setSensitivity();secureCheck();loadSettings();updateLocationViews(null,'Lokasi belum tersedia.');
+  }
 </script>
 </body>
 </html>
